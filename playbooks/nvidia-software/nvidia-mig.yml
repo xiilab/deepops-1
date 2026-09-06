@@ -9,10 +9,22 @@
   vars:
     mig_manager_reboot_timeout: 900
   tasks:
+    # Run nvidia-smi in a transient unit so the probe also works on nodes where
+    # the Slurm login setup hides GPUs from ssh sessions, and only accept a real
+    # MIG mode: with hidden GPUs nvidia-smi prints "No devices were found",
+    # which the previous 'grep -v N/A' let through as a match.
     - name: check for MIG capable devices
-      shell: nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader | grep -v 'N/A'
+      shell: >-
+        set -o pipefail &&
+        systemd-run --wait --pipe --collect --quiet
+        nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader
+        | grep -E '^(Enabled|Disabled)$'
+      args:
+        executable: /bin/bash
+      become: true
       register: has_mig
       failed_when: false
+      changed_when: false
 
     - name: Install MIG Manager
       include_role:
