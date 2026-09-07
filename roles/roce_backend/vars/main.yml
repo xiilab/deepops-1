@@ -35,7 +35,9 @@ num_vf: 8
 # new Kubernetes RDMA/RoCE deployments; this role is a legacy direct-host path.
 mofed_version: "24.10-4.1.4.0"
 mofed_site_place: "MLNX_OFED-24.10-4.1.4.0"
-mofed_file_name: "MLNX_OFED_LINUX-24.10-4.1.4.0-ubuntu24.04-x86_64.iso"
+# The ISO is published per architecture. Follow the mofed role, which already
+# builds this name from ansible_architecture (roles/mofed/defaults/main.yml).
+mofed_file_name: "MLNX_OFED_LINUX-{{ mofed_version }}-ubuntu{{ ansible_distribution_version }}-{{ ansible_architecture }}.iso"
 
 multus_ds: "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
 sriov_dp_ds: "https://raw.githubusercontent.com/k8snetworkplumbingwg/sriov-network-device-plugin/master/deployments/sriovdp-daemonset.yaml"

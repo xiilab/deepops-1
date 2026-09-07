@@ -78,7 +78,7 @@ For new Kubernetes RDMA/RoCE deployments, prefer NVIDIA Network Operator coverag
 # NVIDIA OFED parameters
 mofed_version: "24.10-4.1.4.0"
 mofed_site_place: "MLNX_OFED-24.10-4.1.4.0"
-mofed_file_name: "MLNX_OFED_LINUX-24.10-4.1.4.0-ubuntu24.04-x86_64.iso"
+mofed_file_name: "MLNX_OFED_LINUX-{{ mofed_version }}-ubuntu{{ ansible_distribution_version }}-{{ ansible_architecture }}.iso"
 ```
 
 
