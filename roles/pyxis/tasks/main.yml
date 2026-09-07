@@ -16,7 +16,7 @@
 # Ubuntu 23.10 and later set kernel.apparmor_restrict_unprivileged_userns=1
 # by default, which makes enroot-nsenter fail under pyxis with
 # "failed to create user namespace: Permission denied". Detect the knob by
-# its presence in /proc rather than by distribution version, so the task is
+# its presence in /proc rather than by distribution version, so these tasks are
 # a no-op on kernels built without it.
 - name: check for AppArmor unprivileged user namespace restriction
   stat:
@@ -24,7 +24,50 @@
   register: apparmor_userns_knob
   when: is_compute
 
-- name: allow unprivileged user namespaces for enroot
+- name: check for apparmor_parser
+  stat:
+    path: /sbin/apparmor_parser
+  register: apparmor_parser_bin
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
+
+# Grant the capability to the one executable that needs it rather than clearing
+# the restriction for the whole host.
+- name: install the enroot-nsenter AppArmor profile
+  copy:
+    src: etc/apparmor.d/enroot-nsenter
+    dest: /etc/apparmor.d/enroot-nsenter
+    owner: root
+    group: root
+    mode: "0644"
+  register: enroot_userns_profile
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
+    - apparmor_parser_bin.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+
+- name: load the enroot-nsenter AppArmor profile
+  command: apparmor_parser -r /etc/apparmor.d/enroot-nsenter
+  register: enroot_userns_load
+  failed_when: false
+  when: enroot_userns_profile.changed | default(false)
+
+- name: report a failure to load the enroot-nsenter AppArmor profile
+  fail:
+    msg: >-
+      Could not load /etc/apparmor.d/enroot-nsenter:
+      {{ enroot_userns_load.stderr | default('') }}.
+      The "userns" rule and the "unconfined" flag need AppArmor 4.0 or later.
+      Set pyxis_userns_allow_globally=true to clear
+      kernel.apparmor_restrict_unprivileged_userns for the whole host instead.
+  when: enroot_userns_load.rc | default(0) != 0
+
+# Opt-in fallback for installations where the profile cannot be used. This
+# lowers the security default for every process on the host, so it is off by
+# default and has to be requested explicitly.
+- name: allow unprivileged user namespaces host-wide
   ansible.posix.sysctl:
     name: kernel.apparmor_restrict_unprivileged_userns
     value: "0"
@@ -34,6 +77,7 @@
   when:
     - is_compute
     - apparmor_userns_knob.stat.exists | default(false)
+    - pyxis_userns_allow_globally
 
 - name: install slurm-pmi hook
   file:
