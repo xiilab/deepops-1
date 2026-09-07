@@ -1,3 +1,24 @@
 ---
-mig_manager_url_deb: https://github.com/NVIDIA/mig-parted/releases/download/v0.14.2/nvidia-mig-manager_0.14.2-1_amd64.deb
-mig_manager_url_rpm: https://github.com/NVIDIA/mig-parted/releases/download/v0.14.2/nvidia-mig-manager-0.14.2-1.x86_64.rpm
+# Release assets use different architecture spellings: the .deb uses Debian
+# names (amd64/arm64) while the .rpm uses kernel names (x86_64/aarch64).
+# Keep the two maps separate so a single ansible_architecture value resolves
+# to the right token for each package type.
+# 'arm64' matches existing practice in roles/nvidia-dgx/vars/ubuntu-24.04.yml.
+mig_manager_version: "0.14.2"
+mig_manager_release: "1"
+
+mig_manager_deb_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  arm64: arm64
+
+mig_manager_rpm_arch_map:
+  x86_64: x86_64
+  aarch64: aarch64
+  arm64: aarch64
+
+mig_manager_deb_arch: "{{ mig_manager_deb_arch_map.get(ansible_architecture, ansible_architecture) }}"
+mig_manager_rpm_arch: "{{ mig_manager_rpm_arch_map.get(ansible_architecture, ansible_architecture) }}"
+
+mig_manager_url_deb: https://github.com/NVIDIA/mig-parted/releases/download/v{{ mig_manager_version }}/nvidia-mig-manager_{{ mig_manager_version }}-{{ mig_manager_release }}_{{ mig_manager_deb_arch }}.deb
+mig_manager_url_rpm: https://github.com/NVIDIA/mig-parted/releases/download/v{{ mig_manager_version }}/nvidia-mig-manager-{{ mig_manager_version }}-{{ mig_manager_release }}.{{ mig_manager_rpm_arch }}.rpm
