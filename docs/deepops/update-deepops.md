@@ -538,9 +538,25 @@ ansible-playbook -l slurm-node playbooks/slurm-cluster/nvidia-dcgm-exporter.yml
 To update Pyxis and/or Enroot, edit your DeepOps configuration and specify the new versions you wise to use:
 
 ```bash
-slurm_pyxis_version: "0.11.1"
-enroot_version: "3.2.0"
+slurm_pyxis_version: "0.24.0"
+enroot_version: "4.2.1"
 ```
+
+On RHEL-family hosts, override the RPM URLs alongside the version. The
+`nvidia.enroot` role builds them with a hardcoded `el7` tag, but Enroot moved
+to `el8` artifacts in 3.4.1 and stopped publishing `el7` ones, so raising
+`enroot_version` to 3.4.1 or later on its own makes the download 404:
+
+```bash
+enroot_rpm_packages:
+  - 'https://github.com/NVIDIA/enroot/releases/download/v{{ enroot_version }}/enroot-{{ enroot_version_string }}.el8.x86_64.rpm'
+  - 'https://github.com/NVIDIA/enroot/releases/download/v{{ enroot_version }}/enroot+caps-{{ enroot_version_string }}.el8.x86_64.rpm'
+```
+
+One version needs more than that: 3.4.0 ships `enroot_3.4.0-1_amd64.deb`
+alongside `enroot-3.4.0-2.el7.x86_64.rpm`, and the role derives both filenames
+from a single `enroot_release`, so no value of it satisfies both package
+families. It is the only release where the two disagree; pick a different one.
 
 Then re-run the Pyxis playbook:
 
