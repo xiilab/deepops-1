@@ -17,7 +17,12 @@
 {% endfor %}
 
 # Check that expected processes are running
- {{ ansible_hostname }} || check_ps_service -u root -d {{ nhc_ssh_daemon }} sshd
+# OpenSSH rewrites its process title, so every sshd has argv[0] "sshd:" with a
+# trailing colon -- listener, privsep parent and session alike. check_ps_service
+# defaults its match to "*$DAEMON", which requires the token to END with the
+# daemon name, so "sshd:" never matches and the check reports the service down
+# on a node where sshd is running normally. Widen the pattern.
+ {{ ansible_hostname }} || check_ps_service -u root -m '*{{ nhc_ssh_daemon }}*' -d {{ nhc_ssh_daemon }} sshd
  {{ ansible_hostname }} || check_ps_service -u root slurmd
 
 {% if ansible_local.gpus.count > 0 %}
