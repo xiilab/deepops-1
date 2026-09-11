@@ -1,6 +1,15 @@
 ---
 dcgm_pkg_name: "datacenter-gpu-manager"
 
+# DGX OS ships its own DCGM and the package name differs per release.
+# install-dgx.yml converges on this package and removes the other series.
+dcgm_dgx_pkg_map:
+  "18.04": "datacenter-gpu-manager"           # DGX OS 4
+  "20.04": "datacenter-gpu-manager"           # DGX OS 5
+  "22.04": "datacenter-gpu-manager"           # DGX OS 6
+  "24.04": "datacenter-gpu-manager-4-cuda13"  # DGX OS 7
+dcgm_dgx_pkg_name: "{{ dcgm_dgx_pkg_map[ansible_distribution_version] | default('') }}"
+
 # RedHat family
 epel_package: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
 epel_key_url: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_distribution_major_version }}"
