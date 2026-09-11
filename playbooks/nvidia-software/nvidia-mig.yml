@@ -6,20 +6,58 @@
 
 # Check if MIG capabilities and software on nodes
 - hosts: all
+  become: true
   vars:
     mig_manager_reboot_timeout: 900
   tasks:
+    # ansible_local['gpus']['count'] comes from lspci, so it reports the GPUs the
+    # node has even while the Slurm login setup hides them from ssh sessions.
+    - name: install custom facts
+      include_role:
+        name: facts
+
+    # nvidia-smi runs in a transient unit so the probe also works on nodes where
+    # the Slurm login setup hides GPUs from ssh sessions. The query is kept apart
+    # from the match so its exit status survives: piping the two together reports
+    # the same status whether nvidia-smi answered 'N/A' or never answered at all.
+    #   0 - a GPU reports a MIG mode, configure the node
+    #   1 - the query succeeded and no GPU supports MIG, skip the node
+    #   2 - the query itself failed, which is an error rather than an answer
+    # Only a real mode counts: 'grep -v N/A' also matched warnings and notices
+    # nvidia-smi prints alongside the values.
     - name: check for MIG capable devices
-      shell: nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader | grep -v 'N/A'
+      shell: |
+        set -o pipefail
+        mig_mode=$(systemd-run --wait --pipe --collect --quiet -- \
+          nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader) || exit 2
+        printf '%s\n' "$mig_mode" | grep -E '^(Enabled|Disabled)$'
+      args:
+        executable: /bin/bash
       register: has_mig
       failed_when: false
+      changed_when: false
+
+    # A node whose GPUs cannot be queried is not a node without MIG: skipping it
+    # silently would report a MIG layout as converged that was never looked at.
+    # ansible_local['gpus']['count'] comes from lspci, so a node with no NVIDIA
+    # hardware at all still passes through untouched.
+    - name: fail when the MIG capability probe could not run
+      fail:
+        msg: >-
+          Could not read the MIG mode of the GPUs on this node.
+          nvidia-smi is unavailable or did not answer, while lspci reports
+          {{ ansible_local['gpus']['count'] }} NVIDIA GPU(s).
+          Install the driver on this node, or exclude it from this play.
+      when:
+        - has_mig.rc == 2
+        - ansible_local['gpus']['count'] | default(0) | int > 0
 
     - name: Install MIG Manager
       include_role:
         name: nvidia-mig-manager
       when:
         - has_mig.rc == 0
-    
+
     # TODO: Consider storing a custom copy of the hooks.yaml configuration alongside the config.yaml
     - name: copy cluster-wide mig config file
       copy:
@@ -27,8 +65,14 @@
         dest: "{{ mig_manager_config }}"
       when: has_mig.rc == 0
 
+    # nvidia-mig-parted drives the same GPUs as the probe, so it needs the same
+    # isolation from the ssh cgroup. A failure here is left unhandled on purpose:
+    # a MIG layout that could not be applied must not pass as applied.
     - name: Apply MIG configuration
-      command: nvidia-mig-parted apply -f {{ mig_manager_config }} -c {{ mig_manager_profile }} -k {{ mig_manager_hooks }}
+      command: >-
+        systemd-run --wait --pipe --collect --quiet --
+        nvidia-mig-parted apply -f {{ mig_manager_config }}
+        -c {{ mig_manager_profile }} -k {{ mig_manager_hooks }}
       when: has_mig.rc == 0
 
     # Reboot nodes if necessary and poll for them to come up
@@ -49,5 +93,8 @@
         - has_mig.rc == 0
 
     - name: Assert MIG configuration was applied
-      command: nvidia-mig-parted assert -f {{ mig_manager_config }} -c {{ mig_manager_profile }}
+      command: >-
+        systemd-run --wait --pipe --collect --quiet --
+        nvidia-mig-parted assert -f {{ mig_manager_config }}
+        -c {{ mig_manager_profile }}
       when: has_mig.rc == 0
