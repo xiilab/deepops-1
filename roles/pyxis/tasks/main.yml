@@ -24,6 +24,18 @@
   register: apparmor_userns_knob
   when: is_compute
 
+# The profile is the default path, so its userspace is a dependency of this
+# role rather than something to skip over when it is missing.
+- name: install the AppArmor userspace (Ubuntu)
+  apt:
+    name: apparmor
+    state: present
+  when:
+    - is_compute
+    - ansible_distribution == "Ubuntu"
+    - apparmor_userns_knob.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+
 - name: check for apparmor_parser
   stat:
     path: /sbin/apparmor_parser
@@ -31,6 +43,23 @@
   when:
     - is_compute
     - apparmor_userns_knob.stat.exists | default(false)
+
+# Without this the scoped path is skipped silently and enroot keeps failing
+# with the very error this role exists to prevent.
+- name: fail when the AppArmor userspace is unavailable
+  fail:
+    msg: >-
+      kernel.apparmor_restrict_unprivileged_userns is active but
+      /sbin/apparmor_parser is not present, so the scoped enroot-nsenter
+      profile cannot be loaded and enroot would fail with "failed to create
+      user namespace: Permission denied". Install the AppArmor userspace, or
+      set pyxis_userns_allow_globally=true to clear the restriction for the
+      whole host instead.
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+    - not apparmor_parser_bin.stat.exists | default(false)
 
 # Grant the capability to the one executable that needs it rather than clearing
 # the restriction for the whole host.
@@ -45,14 +74,31 @@
   when:
     - is_compute
     - apparmor_userns_knob.stat.exists | default(false)
-    - apparmor_parser_bin.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+
+# Loading only on a file change leaves a node unrepaired when the first load
+# failed, or when the profile was unloaded by hand while the file stayed as it
+# was. The kernel's own list decides, so a rerun converges either way.
+- name: check whether the enroot-nsenter profile is loaded
+  command: grep -q "^enroot-nsenter " /sys/kernel/security/apparmor/profiles
+  register: enroot_userns_loaded
+  changed_when: false
+  failed_when: false
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
     - not pyxis_userns_allow_globally
 
 - name: load the enroot-nsenter AppArmor profile
   command: apparmor_parser -r /etc/apparmor.d/enroot-nsenter
   register: enroot_userns_load
   failed_when: false
-  when: enroot_userns_profile.changed | default(false)
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+    - (enroot_userns_profile.changed | default(false))
+      or (enroot_userns_loaded.rc | default(1) != 0)
 
 - name: report a failure to load the enroot-nsenter AppArmor profile
   fail:
@@ -78,6 +124,26 @@
     - is_compute
     - apparmor_userns_knob.stat.exists | default(false)
     - pyxis_userns_allow_globally
+
+# Flipping the fallback back off has to take its setting with it, otherwise the
+# host keeps the lowered default that the profile was meant to replace.
+# "sysctl --system" reapplies the remaining files, so the value returns to what
+# the distribution ships rather than to one this role invents.
+- name: drop the host-wide user namespace sysctl when the fallback is off
+  ansible.posix.sysctl:
+    name: kernel.apparmor_restrict_unprivileged_userns
+    sysctl_file: /etc/sysctl.d/60-enroot-userns.conf
+    state: absent
+  register: enroot_userns_sysctl_removed
+  when:
+    - is_compute
+    - apparmor_userns_knob.stat.exists | default(false)
+    - not pyxis_userns_allow_globally
+
+- name: reapply the remaining sysctl configuration
+  command: sysctl --system
+  changed_when: true
+  when: enroot_userns_sysctl_removed.changed | default(false)
 
 - name: install slurm-pmi hook
   file:
