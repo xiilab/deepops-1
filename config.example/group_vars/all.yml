@@ -190,6 +190,17 @@ enroot_config: |
   ENROOT_RUNTIME_PATH {{ enroot_runtime_path }}
   ENROOT_CACHE_PATH {{ enroot_cache_path }}
   ENROOT_DATA_PATH {{ enroot_data_path }}
+
+# The nvidia.enroot role builds its RPM URLs with a hardcoded el7 tag. Enroot
+# moved to el8 artifacts in 3.4.1 and stopped publishing el7 ones, so pick the
+# tag from the version being installed. The tag tracks the Enroot release
+# rather than the host distribution because Enroot ships no el9 artifacts --
+# RHEL 9 installs the el8 packages too. The deb URLs need no equivalent
+# override; their filenames have not changed.
+enroot_rpm_packages:
+  - "https://github.com/NVIDIA/enroot/releases/download/v{{ enroot_version }}/enroot-{{ enroot_version_string }}.{{ 'el8' if enroot_version is version('3.4.1', '>=') else 'el7' }}.x86_64.rpm"
+  - "https://github.com/NVIDIA/enroot/releases/download/v{{ enroot_version }}/enroot+caps-{{ enroot_version_string }}.{{ 'el8' if enroot_version is version('3.4.1', '>=') else 'el7' }}.x86_64.rpm"
+
 enroot_environ_config_files: []
 enroot_environ_config_files_dgx:
   - filename: 50-mellanox.env
