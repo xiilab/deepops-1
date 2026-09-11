@@ -2,21 +2,40 @@
 # Install the NVIDIA MIG Manager tooling on all MIG-capable nodes
 
 # Check node state. nvidia-smi runs in a transient unit so the probe also works
-# on nodes where the Slurm login setup hides GPUs from ssh sessions, and only a
-# real MIG mode counts: with hidden GPUs nvidia-smi prints "No devices were
-# found", which 'grep -v N/A' would accept as a match.
+# on nodes where the Slurm login setup hides GPUs from ssh sessions. The query is
+# kept apart from the match so its exit status survives: piping the two together
+# reports the same status whether nvidia-smi answered 'N/A' or never answered.
+#   0 - a GPU reports a MIG mode, install the MIG manager
+#   1 - the query succeeded and no GPU supports MIG, skip the node
+#   2 - the query itself failed, which is an error rather than an answer
+# Only a real mode counts: 'grep -v N/A' also matched warnings and notices
+# nvidia-smi prints alongside the values.
 - name: check for MIG capable devices
-  shell: >-
-    set -o pipefail &&
-    systemd-run --wait --pipe --collect --quiet
-    nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader
-    | grep -E '^(Enabled|Disabled)$'
+  become: true
+  shell: |
+    set -o pipefail
+    mig_mode=$(systemd-run --wait --pipe --collect --quiet -- \
+      nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader) || exit 2
+    printf '%s\n' "$mig_mode" | grep -E '^(Enabled|Disabled)$'
   args:
     executable: "/bin/bash"
-  become: true
   register: has_mig
   failed_when: false
   changed_when: false
+
+# A node whose GPUs cannot be queried is not a node without MIG: installing
+# nothing and reporting it as converged hides a broken driver. The lspci fact
+# keeps nodes with no NVIDIA hardware out of this.
+- name: fail when the MIG capability probe could not run
+  fail:
+    msg: >-
+      Could not read the MIG mode of the GPUs on this node.
+      nvidia-smi is unavailable or did not answer, while lspci reports
+      {{ ansible_local['gpus']['count'] }} NVIDIA GPU(s).
+      Install the driver on this node, or exclude it from this play.
+  when:
+    - has_mig.rc == 2
+    - ansible_local['gpus']['count'] | default(0) | int > 0
 
 - name: check for NVIDIA MIG parted
   shell: which nvidia-mig-parted  # noqa command-instead-of-shell
@@ -37,5 +56,6 @@
     name: "{{ mig_manager_url_rpm }}"
     state: present
   when:
+    - has_mig.rc == 0
     - has_mig_parted.rc != 0
     - ansible_os_family == "RedHat"

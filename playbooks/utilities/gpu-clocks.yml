@@ -11,7 +11,9 @@
     # commands run over the Ansible connection cannot see the devices.
     # Note: -acp is deprecated in current drivers and treated as a no-op.
     - name: set GPU clocks permissions
-      command: systemd-run --wait --pipe --collect --quiet nvidia-smi -acp UNRESTRICTED
+      command: >-
+        systemd-run --wait --pipe --collect --quiet --
+        nvidia-smi -acp UNRESTRICTED
       changed_when: false
       when:
         - ansible_local['gpus']['count']

@@ -23,8 +23,12 @@
         name: nvidia.nvidia_driver
       when: (ansible_local['gpus']['count'] and is_dgx.stat.exists == False) or (nvidia_driver_force_install|default(false))
 
+    # Run in a transient unit so the check also works on nodes where the Slurm
+    # login setup hides GPUs from ssh sessions (see login-compute-setup).
     - name: test nvidia-smi
-      command: nvidia-smi
+      command: >-
+        systemd-run --wait --pipe --collect --quiet --
+        nvidia-smi
       changed_when: false
       when:
         - ansible_local['gpus']['count']
