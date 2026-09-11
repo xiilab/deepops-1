@@ -4,11 +4,52 @@
     path: /etc/dgx-release
   register: is_dgx
 
+# Driver R470.42.01 and later ship nvidia_peermem in-tree. On those
+# systems the out-of-tree nv_peer_mem DKMS module does not exist.
+- name: Check for in-tree nvidia_peermem module
+  command: modinfo nvidia_peermem
+  register: nvidia_peermem_info
+  failed_when: false
+  changed_when: false
+  when:
+    - ansible_local['gpus']['count']
+    - is_dgx.stat.exists
+
+# A host upgraded from a pre-R470 driver may still carry the legacy
+# nv_peer_mem service and module. Retire them before loading the in-tree
+# module so the two never coexist. Every step is a no-op once converged.
+- name: Use in-tree nvidia_peermem
+  when:
+    - ansible_local['gpus']['count']
+    - is_dgx.stat.exists
+    - nvidia_peermem_info.rc | default(1) == 0
+  block:
+    - name: Populate service facts
+      service_facts:
+
+    - name: Stop and disable legacy nv_peer_mem service
+      service:
+        name: nv_peer_mem
+        state: stopped
+        enabled: false
+      when: "'nv_peer_mem.service' in ansible_facts.services"
+
+    - name: Unload legacy nv_peer_mem module
+      modprobe:
+        name: nv_peer_mem
+        state: absent
+
+    - name: Load in-tree nvidia_peermem
+      modprobe:
+        name: nvidia_peermem
+        state: present
+
 - name: Autoinstall DKMS modules
   command: dkms autoinstall
   when:
     - ansible_local['gpus']['count']
     - is_dgx.stat.exists
+    - nvidia_peermem_info.rc | default(1) != 0
 
 - name: Modprobe nv_peer_mem
   modprobe:
@@ -17,6 +58,7 @@
   when:
     - ansible_local['gpus']['count']
     - is_dgx.stat.exists
+    - nvidia_peermem_info.rc | default(1) != 0
 
 - name: Start nv_peer_mem service
   service:
@@ -25,3 +67,4 @@
   when:
     - ansible_local['gpus']['count']
     - is_dgx.stat.exists
+    - nvidia_peermem_info.rc | default(1) != 0
